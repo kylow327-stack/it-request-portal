@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>IT Request Portal — Prototype v0.5.1 — light theme</title>
+<style>
+  :root {
+    --bg: #f4f6fa; --surface: #ffffff; --surface2: #eef2f7; --border: #d8dee8;
+    --text: #1a2332; --muted: #5b6b82; --accent: #2563eb; --accent2: #16a34a;
+    --warn: #d97706; --p0: #dc2626; --p1: #d97706; --p2: #2563eb; --p3: #64748b;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+  header { display: flex; align-items: center; justify-content: space-between; padding: 12px 24px; border-bottom: 1px solid var(--border); background: var(--surface); }
+  header .brand { font-weight: 700; } header .brand span { color: var(--accent); }
+  header .badge { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; background: #dbeafe; color: #1e40af; padding: 4px 10px; border-radius: 999px; }
+  nav.role { display: flex; gap: 8px; padding: 10px 24px; background: #e8eef7; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  nav.role button { background: transparent; border: 1px solid var(--border); color: var(--muted); padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+  nav.role button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+  main { max-width: 1100px; margin: 0 auto; padding: 28px 20px 60px; }
+  .screen { display: none; } .screen.active { display: block; animation: fade 0.2s ease; }
+  @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  h1 { font-size: 26px; margin: 0 0 8px; letter-spacing: -0.03em; }
+  h2 { font-size: 16px; margin: 0 0 12px; }
+  .sub { color: var(--muted); margin: 0 0 22px; line-height: 1.5; font-size: 14px; }
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  @media (max-width: 800px) { .cards { grid-template-columns: 1fr; } }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; cursor: pointer; transition: border-color 0.15s, transform 0.15s; }
+  .card:hover { border-color: var(--accent); transform: translateY(-2px); }
+  .card .icon { font-size: 26px; margin-bottom: 8px; }
+  .card h3 { margin: 0 0 6px; font-size: 15px; }
+  .card p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.45; }
+  .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 14px 0 6px; }
+  input, select, textarea { width: 100%; background: var(--surface2); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 10px 12px; font: inherit; }
+  textarea { min-height: 90px; resize: vertical; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 640px) { .row { grid-template-columns: 1fr; } }
+  .actions { display: flex; gap: 10px; margin-top: 18px; flex-wrap: wrap; }
+  button.primary, button.ghost, button.success { border: none; border-radius: 8px; padding: 10px 16px; font: inherit; cursor: pointer; }
+  button.primary { background: var(--accent); color: #fff; }
+  button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+  button.success { background: var(--accent2); color: #fff; font-weight: 600; }
+  .chat { display: flex; flex-direction: column; height: 400px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+  .chat-log { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .bubble { max-width: 80%; padding: 10px 14px; border-radius: 12px; font-size: 14px; line-height: 1.45; }
+  .bubble.bot { align-self: flex-start; background: var(--surface2); }
+  .bubble.user { align-self: flex-end; background: #2563eb; color: #fff; }
+  .chat-input { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--border); }
+  .chat-input input { flex: 1; }
+  .prio { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 16px 0; }
+  .prio-chip { text-align: center; padding: 12px 8px; border-radius: 10px; border: 2px solid transparent; background: var(--surface2); }
+  .prio-chip.selected { border-color: var(--accent); }
+  .prio-chip .lvl { font-weight: 700; font-size: 18px; }
+  .score-box { background: var(--surface2); border-radius: 10px; padding: 14px; margin-top: 12px; font-size: 13px; color: var(--muted); line-height: 1.6; }
+  .score-box strong { color: var(--text); }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 500; white-space: nowrap; }
+  tr.clickable { cursor: pointer; }
+  tr.clickable:hover { background: var(--surface2); }
+  .desc-clip { color: var(--muted); max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tag { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 999px; font-weight: 600; }
+  .tag.p0 { background: #fee2e2; color: #991b1b; }
+  .tag.p1 { background: #ffedd5; color: #9a3412; }
+  .tag.p2 { background: #dbeafe; color: #1e40af; }
+  .tag.p3 { background: #e2e8f0; color: #334155; }
+  .tag.phase { background: #dcfce7; color: #166534; }
+  .tag.st-intake { background: #dbeafe; color: #1e40af; }
+  .tag.st-prd { background: #f3e8ff; color: #6b21a8; }
+  .tag.st-delivery { background: #fef3c7; color: #92400e; }
+  .tag.st-signoff { background: #ccfbf1; color: #115e59; }
+  .tag.st-closed { background: #dcfce7; color: #166534; }
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 720px) { .split { grid-template-columns: 1fr; } }
+  .doc-block { background: var(--surface2); border-radius: 8px; padding: 12px; margin-top: 8px; font-size: 12px; color: var(--muted); white-space: pre-wrap; font-family: ui-monospace, monospace; max-height: 180px; overflow-y: auto; }
+  .steps { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 20px; font-size: 11px; color: var(--muted); }
+  .steps span { padding: 4px 8px; border-radius: 6px; background: var(--surface2); }
+  .steps span.on { background: #dbeafe; color: #1e40af; }
+  .steps span.done { background: #dcfce7; color: #166534; }
+  .note { margin-top: 20px; padding: 12px 14px; border-left: 3px solid var(--warn); background: #fffbeb; color: #92400e; font-size: 12px; border-radius: 0 8px 8px 0; }
+  .metrics { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 16px; }
+  @media (max-width: 800px) { .metrics { grid-template-columns: 1fr 1fr; } }
+  .metric { background: var(--surface2); border-radius: 10px; padding: 14px; text-align: center; }
+  .metric .n { font-size: 22px; font-weight: 700; }
+  .metric .l { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .toolbar .left, .toolbar .right { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .detail-grid { display: grid; grid-template-columns: 140px 1fr; gap: 8px 12px; font-size: 13px; }
+  .detail-grid .k { color: var(--muted); }
+  .tabs { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
+  .tabs button { background: transparent; border: 1px solid var(--border); color: var(--muted); padding: 6px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; }
+  .tabs button.active { background: var(--surface2); color: var(--text); border-color: var(--accent); }
+
+  .toast { position: fixed; bottom: 24px; right: 24px; background: #166534; color: #fff; padding: 14px 18px; border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.15); font-size: 14px; z-index: 50; display: none; max-width: 360px; }
+  .toast.show { display: block; animation: fade 0.2s ease; }
+  nav.role.biz-only { display: none !important; }
+  nav.role button[data-role="it"] { display: none; }
+  nav.role.it-mode button[data-role="it"] { display: inline-block; }
+  nav.role.it-mode button[data-role="requester"] { display: inline-block; }
+  .prio-chip .lbl { font-size: 11px; color: var(--muted); margin-top: 4px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">IT Request <span>Portal</span></div>
+  <div class="badge">Prototype v0.5.1 — Intake fixes</div>
+</header>
+<nav class="role biz-only" id="role-nav">
+  <button type="button" class="active" data-role="requester" onclick="setRole('requester')">Business User</button>
+  <button type="button" data-role="it" onclick="setRole('it')">IT (BA / Engineer)</button>
+</nav>
+<p class="demo-switch" id="demo-switch" style="margin:0;padding:6px 24px;font-size:11px;color:var(--muted);background:#e8eef7;border-bottom:1px solid var(--border)">Demo only: <a href="#" onclick="event.preventDefault();setRole('it');return false;" style="color:var(--accent)">Switch to IT view</a> · <span style="opacity:.8">not shown to real business users in production</span></p>
+<div class="toast" id="toast"></div>
+<main>
+  <section id="landing" class="screen active">
+    <div class="steps">
+      <span class="on">1. Entry</span><span>2. Capture</span><span>3. Review &amp; Submit</span>
+      <span>4. Prioritize</span><span>5. Boards / PRD</span><span>6. Delivery</span><span>7. Sign-off</span>
+    </div>
+    <h1>How can IT help?</h1>
+    <p class="sub">Log a request, chat to draft one, or open your ticket board.</p>
+    <div class="cards">
+      <div class="card" onclick="go('form')"><div class="icon">📝</div><h3>Fill a request form</h3><p>Structured intake with urgency, impact, complexity, and value.</p></div>
+      <div class="card" onclick="go('chat')"><div class="icon">💬</div><h3>Chat with the bot</h3><p>Answer questions; we extract into the form for your check.</p></div>
+      <div class="card" onclick="go('my-board')"><div class="icon">📋</div><h3>My tickets board</h3><p>See requests you submitted and their current status.</p></div>
+    </div>
+    <p class="note">Prototype only — sample tickets are fictional. Export downloads CSV (Excel-openable).</p>
+  </section>
+
+  <section id="form" class="screen">
+    <div class="steps"><span class="done">1. Entry</span><span class="on">2. Capture</span><span>3. Review</span><span>4+</span></div>
+    <h1>New IT request</h1>
+    <p class="sub">Complete fields, then continue to review before submission.</p>
+    <div class="panel">
+      <label>Title</label><input id="f-title" value="" placeholder="Short summary of what you need" />
+      <label>Description</label><textarea id="f-desc" placeholder="What is broken or needed? Who is affected? Since when?"></textarea>
+      <div class="row">
+        <div><label>How urgent is this?</label><select id="f-urgency"><option value="P0">Critical — work stopped now</option><option value="P1">High — needed this week</option><option value="P2" selected>Normal — planned work</option><option value="P3">Low — nice to have</option></select></div>
+        <div><label>Direct business impact?</label><select id="f-impact"><option value="yes" selected>Yes</option><option value="no">No</option></select></div>
+      </div>
+      <div class="row">
+        <div><label>Complexity</label><select id="f-complexity"><option value="low">Low</option><option value="med" selected>Medium</option><option value="high">High</option></select></div>
+        <div><label>Business value</label><select id="f-value"><option value="high" selected>High</option><option value="med">Medium</option><option value="low">Low</option></select></div>
+      </div>
+      <div class="actions"><button type="button" class="ghost" onclick="go('landing')">Back</button><button type="button" class="primary" onclick="toReviewFromForm()">Continue to review</button></div>
+    </div>
+  </section>
+
+  <section id="chat" class="screen">
+    <div class="steps"><span class="done">1. Entry</span><span class="on">2. Capture (chat)</span><span>3. Review</span></div>
+    <h1>Chat intake</h1>
+    <p class="sub">Scripted Q&amp;A — answers fill the form for check.</p>
+    <div class="chat"><div class="chat-log" id="chat-log"></div>
+      <div class="chat-input"><input id="chat-in" placeholder="Type your reply…" onkeydown="if(event.key==='Enter')sendChat()" /><button type="button" class="primary" onclick="sendChat()">Send</button></div>
+    </div>
+    <div class="actions"><button type="button" class="ghost" onclick="go('landing')">Back</button><button type="button" class="primary" id="btn-extract" disabled onclick="extractToForm()">Extract to form for check</button></div>
+  </section>
+
+  <section id="review" class="screen">
+    <div class="steps"><span class="done">1–2</span><span class="on">3. Review &amp; Submit</span><span>4. Prioritize</span></div>
+    <h1>Check before submit</h1>
+    <p class="sub">Edit anything wrong, then submit.</p>
+    <div class="panel">
+      <label>Title</label><input id="r-title" />
+      <label>Description</label><textarea id="r-desc"></textarea>
+      <div class="row">
+        <div><label>How urgent is this?</label><select id="r-urgency"><option value="P0">Critical — work stopped now</option><option value="P1">High — needed this week</option><option value="P2">Normal — planned work</option><option value="P3">Low — nice to have</option></select></div>
+        <div><label>Direct business impact</label><select id="r-impact"><option value="yes">Yes</option><option value="no">No</option></select></div>
+      </div>
+      <div class="row">
+        <div><label>Complexity</label><select id="r-complexity"><option value="low">Low</option><option value="med">Medium</option><option value="high">High</option></select></div>
+        <div><label>Business value</label><select id="r-value"><option value="high">High</option><option value="med">Medium</option><option value="low">Low</option></select></div>
+      </div>
+      <div class="actions"><button type="button" class="ghost" onclick="go('landing')">Cancel</button><button type="button" class="success" onclick="submitRequest()">Submit request</button></div>
+    </div>
+  </section>
+
+  <section id="prio" class="screen">
+    <div class="steps"><span class="done">1–3</span><span class="on">4. Prioritize</span><span>5. Boards</span></div>
+    <h1>Prioritization result</h1>
+    <p class="sub">Illustrative composite score. Override remains human-only.</p>
+    <div class="panel">
+      <div class="prio" id="prio-chips"></div>
+      <div class="score-box" id="score-box"></div>
+      <div class="actions">
+        <button type="button" class="ghost" onclick="go('my-board')">My tickets board</button>
+        <button type="button" class="primary" id="btn-open-it" onclick="setRole('it')">Open IT board</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- BUSINESS USER BOARD -->
+  <section id="my-board" class="screen">
+    <h1>My tickets</h1>
+    <p class="sub">Requests you submitted — status only. Click a row for detail.</p>
+    <div class="toolbar">
+      <div class="left"><button type="button" class="ghost" onclick="go('landing')">← Home</button></div>
+      <div class="right"><button type="button" class="primary" onclick="go('form')">New request</button></div>
+    </div>
+    <div class="panel table-wrap">
+      <table>
+        <thead><tr><th>ID</th><th>Title</th><th>Submitted</th><th>Expected delivery</th><th>Priority</th><th>Status</th><th>Assignee</th></tr></thead>
+        <tbody id="my-board-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- IT BOARD + DASHBOARD -->
+  <section id="it-board" class="screen">
+    <h1>IT operations board</h1>
+    <p class="sub">All received tickets — click description/row to open detail. Dashboard counts by status; export CSV (Excel).</p>
+    <div class="tabs">
+      <button type="button" class="active" id="tab-board" onclick="showItTab('board')">Ticket board</button>
+      <button type="button" id="tab-dash" onclick="showItTab('dash')">Dashboard</button>
+      <button type="button" id="tab-queue" onclick="showItTab('queue')">PRD / Specs queue</button>
+    </div>
+    <div id="it-tab-board">
+      <div class="toolbar">
+        <div class="left"><span style="font-size:12px;color:var(--muted)">Filter:</span>
+          <select id="it-filter" onchange="renderItBoard()" style="width:auto">
+            <option value="all">All statuses</option>
+            <option value="Intake">Intake</option>
+            <option value="PRD / Specs">PRD / Specs</option>
+            <option value="Delivery">Delivery</option>
+            <option value="Sign-off">Sign-off</option>
+            <option value="Closed">Closed</option>
+          </select>
+        </div>
+        <div class="right">
+          <button type="button" class="ghost" onclick="exportTickets('csv')">Export CSV</button>
+          <button type="button" class="ghost" onclick="exportTickets('xlsx')">Export Excel (.csv)</button>
+        </div>
+      </div>
+      <div class="panel table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th><th>Title / description</th><th>Submitted</th><th>Expected delivery</th>
+              <th>Priority</th><th>Status</th><th>Assignee</th>
+            </tr>
+          </thead>
+          <tbody id="it-board-body"></tbody>
+        </table>
+      </div>
+    </div>
+    <div id="it-tab-dash" style="display:none">
+      <div class="toolbar">
+        <div class="left"><h2 style="margin:0">Tickets by status</h2></div>
+        <div class="right">
+          <button type="button" class="ghost" onclick="exportTickets('csv')">Export CSV</button>
+          <button type="button" class="ghost" onclick="exportTickets('xlsx')">Export Excel (.csv)</button>
+        </div>
+      </div>
+      <div class="metrics" id="dash-metrics"></div>
+      <div class="panel table-wrap">
+        <table>
+          <thead><tr><th>Status</th><th>Ticket count</th><th>% of total</th></tr></thead>
+          <tbody id="dash-table"></tbody>
+        </table>
+      </div>
+    </div>
+    <div id="it-tab-queue" style="display:none">
+      <div class="panel table-wrap">
+        <table>
+          <thead><tr><th>ID</th><th>Title</th><th>Priority</th><th>Phase</th><th></th></tr></thead>
+          <tbody id="queue-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section id="ticket-detail" class="screen">
+    <h1 id="detail-title">Ticket detail</h1>
+    <p class="sub" id="detail-sub"></p>
+    <div class="panel">
+      <div class="detail-grid" id="detail-grid"></div>
+      <div class="actions" id="detail-actions"></div>
+    </div>
+  </section>
+
+  <section id="workspace" class="screen">
+    <div class="steps"><span class="done">Intake</span><span class="on">PRD / Specs</span><span>Delivery</span><span>Sign-off</span></div>
+    <h1 id="ws-title">Workspace</h1>
+    <p class="sub">BA owns PRD; Engineer owns Specs.</p>
+    <div class="split">
+      <div class="panel"><h2>PRD (BA)</h2><div class="doc-block" id="prd-doc"></div>
+        <div class="actions"><button type="button" class="ghost" onclick="alert('Prototype: PRD marked ready')">Mark PRD ready</button></div></div>
+      <div class="panel"><h2>Specs (Engineer)</h2><div class="doc-block" id="spec-doc"></div>
+        <div class="actions"><button type="button" class="ghost" onclick="alert('Prototype: Specs marked ready')">Mark Specs ready</button></div></div>
+    </div>
+    <div class="actions">
+      <button type="button" class="ghost" onclick="go('it-board'); showItTab('queue')">Back</button>
+      <button type="button" class="primary" onclick="go('delivery')">Push to delivery</button>
+    </div>
+  </section>
+
+  <section id="delivery" class="screen">
+    <h1>Delivery in progress</h1>
+    <p class="sub">When done, requester is asked to sign off.</p>
+    <div class="panel">
+      <p id="del-line"></p>
+      <div class="actions"><button type="button" class="primary" onclick="go('signoff')">Request user sign-off</button></div>
+    </div>
+  </section>
+
+  <section id="signoff" class="screen">
+    <h1>Requester sign-off</h1>
+    <p class="sub">Confirm resolution to close.</p>
+    <div class="panel">
+      <label>Acceptance notes</label><textarea placeholder="Looks good."></textarea>
+      <div class="actions">
+        <button type="button" class="ghost" onclick="go('delivery')">Needs changes</button>
+        <button type="button" class="success" onclick="closeActive()">Sign off &amp; close</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="closed" class="screen">
+    <h1>Request closed</h1>
+    <p class="sub">End-to-end path complete for this ticket.</p>
+    <div class="panel">
+      <p style="color:var(--accent2);font-weight:600">✓ Closed</p>
+      <div class="actions">
+        <button type="button" class="ghost" onclick="go('my-board')">My board</button>
+        <button type="button" class="primary" onclick="setRole('it')">IT board</button>
+        <button type="button" class="ghost" onclick="resetAll()">Restart demo</button>
+      </div>
+    </div>
+  </section>
+</main>
+<script>
+const ME = "rick.business@example.com";
+const seed = [
+  { id:"REQ-1042", title:"SSO login failure for partner portal", desc:"Partners cannot complete SSO after IdP cert rotation.", submitted:"2026-09-20", eta:"2026-09-25", priority:"P1", status:"PRD / Specs", assignee:"Alex Chen (BA)", requester:ME, complexity:"med", value:"high", impact:"yes" },
+  { id:"REQ-1038", title:"Export payroll CSV for finance", desc:"Need monthly CSV export with cost-center columns.", submitted:"2026-09-15", eta:"2026-09-28", priority:"P2", status:"Delivery", assignee:"Sam Okonkwo (Eng)", requester:ME, complexity:"low", value:"med", impact:"yes" },
+  { id:"REQ-1031", title:"VPN split-tunnel for contractors", desc:"Contractors need split tunnel without full VPN.", submitted:"2026-09-10", eta:"2026-09-22", priority:"P3", status:"Sign-off", assignee:"Jordan Lee (Eng)", requester:ME, complexity:"med", value:"low", impact:"no" },
+  { id:"REQ-1024", title:"Reset MFA for shared kiosk", desc:"Factory floor kiosk MFA lockout after tablet wipe.", submitted:"2026-09-05", eta:"2026-09-08", priority:"P0", status:"Closed", assignee:"Alex Chen (BA)", requester:"other.user@example.com", complexity:"low", value:"high", impact:"yes" },
+  { id:"REQ-1019", title:"Power BI gateway upgrade", desc:"Gateway version lagging; refresh failures.", submitted:"2026-09-01", eta:"", priority:"P2", status:"Intake", assignee:"Unassigned", requester:"finance.ops@example.com", complexity:"high", value:"med", impact:"yes" }
+];
+let tickets = JSON.parse(JSON.stringify(seed));
+let activeId = "REQ-1042";
+let detailReturn = "my-board";
+const draft = { title:"", desc:"", urgency:"P1", impact:"yes", complexity:"med", value:"high", chatStep:0, chatAnswers:{} };
+const chatScript = [
+  { q:"Hi — in one line, what do you need help with?", key:"title" },
+  { q:"Any more detail — who is affected and since when?", key:"desc" },
+  { q:"How urgent? Critical (work stopped), High (this week), Normal, or Low.", key:"urgency" },
+  { q:"Direct business impact (revenue/customers/critical ops)? Yes or No.", key:"impact" },
+  { q:"Thanks — I'll open the review form so you can check before submit.", key:null }
+];
+
+function statusClass(s) {
+  return ({ "Intake":"st-intake", "PRD / Specs":"st-prd", "Delivery":"st-delivery", "Sign-off":"st-signoff", "Closed":"st-closed" })[s] || "phase";
+}
+function prioLabel(p) {
+  return ({ P0:"Critical", P1:"High", P2:"Normal", P3:"Low" })[p] || p;
+}
+function showToast(msg) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.classList.add("show");
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => el.classList.remove("show"), 4200);
+}
+let currentRole = "requester";
+function setRole(role) {
+  currentRole = role;
+  document.querySelectorAll("nav.role button").forEach(b => b.classList.toggle("active", b.dataset.role === role));
+  const nav = document.getElementById("role-nav");
+  const demo = document.getElementById("demo-switch");
+  if (role === "requester") {
+    nav.classList.add("biz-only");
+    nav.classList.remove("it-mode");
+    if (demo) demo.style.display = "";
+    go("landing");
+  } else {
+    nav.classList.remove("biz-only");
+    nav.classList.add("it-mode");
+    if (demo) demo.style.display = "none";
+    go("it-board"); showItTab("board");
+  }
+}
+function go(id) {
+  document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
+  document.getElementById(id).classList.add("active");
+  if (id === "chat") initChat();
+  if (id === "my-board") renderMyBoard();
+  if (id === "it-board") { renderItBoard(); renderDash(); renderQueue(); }
+  if (id === "workspace") renderWorkspace();
+  if (id === "delivery") {
+    const t = byId(activeId);
+    document.getElementById("del-line").innerHTML = `<strong>${t.id}</strong> — ${esc(t.title)}<br><span style="color:var(--muted);font-size:13px">Assignee: ${esc(t.assignee)} · ETA: ${t.eta || "TBD"} · Status: Delivery</span>`;
+  }
+}
+function showItTab(tab) {
+  document.getElementById("it-tab-board").style.display = tab === "board" ? "" : "none";
+  document.getElementById("it-tab-dash").style.display = tab === "dash" ? "" : "none";
+  document.getElementById("it-tab-queue").style.display = tab === "queue" ? "" : "none";
+  document.getElementById("tab-board").classList.toggle("active", tab === "board");
+  document.getElementById("tab-dash").classList.toggle("active", tab === "dash");
+  document.getElementById("tab-queue").classList.toggle("active", tab === "queue");
+  if (tab === "dash") renderDash();
+  if (tab === "queue") renderQueue();
+}
+function byId(id) { return tickets.find(t => t.id === id); }
+function esc(s) { return String(s||"").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
+
+function renderMyBoard() {
+  const mine = tickets.filter(t => t.requester === ME);
+  document.getElementById("my-board-body").innerHTML = mine.map(t => `
+    <tr class="clickable" onclick="openDetail('${t.id}','my-board')">
+      <td>${t.id}</td>
+      <td>${esc(t.title)}</td>
+      <td>${t.submitted}</td>
+      <td>${t.eta || "—"}</td>
+      <td><span class="tag ${t.priority.toLowerCase()}" title="${t.priority}">${prioLabel(t.priority)}</span></td>
+      <td><span class="tag ${statusClass(t.status)}">${t.status}</span></td>
+      <td>${esc(t.assignee)}</td>
+    </tr>`).join("") || `<tr><td colspan="7" style="color:var(--muted)">No tickets yet.</td></tr>`;
+}
+function renderItBoard() {
+  const f = document.getElementById("it-filter").value;
+  const rows = tickets.filter(t => f === "all" || t.status === f);
+  document.getElementById("it-board-body").innerHTML = rows.map(t => `
+    <tr class="clickable" onclick="openDetail('${t.id}','it-board')">
+      <td>${t.id}</td>
+      <td><div>${esc(t.title)}</div><div class="desc-clip" title="${esc(t.desc)}">${esc(t.desc)}</div></td>
+      <td>${t.submitted}</td>
+      <td>${t.eta || "—"}</td>
+      <td><span class="tag ${t.priority.toLowerCase()}" title="${t.priority}">${prioLabel(t.priority)}</span></td>
+      <td><span class="tag ${statusClass(t.status)}">${t.status}</span></td>
+      <td>${esc(t.assignee)}</td>
+    </tr>`).join("");
+}
+function renderDash() {
+  const order = ["Intake","PRD / Specs","Delivery","Sign-off","Closed"];
+  const counts = Object.fromEntries(order.map(s => [s, 0]));
+  tickets.forEach(t => { if (counts[t.status] != null) counts[t.status]++; });
+  const total = tickets.length || 1;
+  document.getElementById("dash-metrics").innerHTML = order.map(s =>
+    `<div class="metric"><div class="n">${counts[s]}</div><div class="l">${s}</div></div>`
+  ).join("") + `<div class="metric"><div class="n">${tickets.length}</div><div class="l">Total</div></div>`;
+  document.getElementById("dash-table").innerHTML = order.map(s =>
+    `<tr><td>${s}</td><td>${counts[s]}</td><td>${Math.round(counts[s]*100/total)}%</td></tr>`
+  ).join("");
+}
+function renderQueue() {
+  const q = tickets.filter(t => t.status === "PRD / Specs");
+  document.getElementById("queue-body").innerHTML = q.map(t => `
+    <tr>
+      <td>${t.id}</td><td>${esc(t.title)}</td>
+      <td><span class="tag ${t.priority.toLowerCase()}">${t.priority}</span></td>
+      <td><span class="tag phase">PRD / Specs</span></td>
+      <td><button type="button" class="primary" style="padding:6px 10px;font-size:12px" onclick="event.stopPropagation();activeId='${t.id}';go('workspace')">Open</button></td>
+    </tr>`).join("") || `<tr><td colspan="5" style="color:var(--muted)">No items in PRD/Specs.</td></tr>`;
+}
+function openDetail(id, ret) {
+  activeId = id; detailReturn = ret;
+  const t = byId(id);
+  document.getElementById("detail-title").textContent = `${t.id} — ${t.title}`;
+  document.getElementById("detail-sub").textContent = "Full ticket detail (prototype).";
+  document.getElementById("detail-grid").innerHTML = [
+    ["Description", t.desc], ["Submitted", t.submitted], ["Expected delivery", t.eta || "Not set"],
+    ["Priority", t.priority], ["Status", t.status], ["Assignee", t.assignee],
+    ["Requester", t.requester], ["Impact", t.impact], ["Complexity", t.complexity], ["Business value", t.value]
+  ].map(([k,v]) => `<div class="k">${esc(k)}</div><div>${esc(v)}</div>`).join("");
+  const back = ret === "it-board" ? "IT board" : "My board";
+  let extra = `<button type="button" class="ghost" onclick="go('${ret}')">← ${back}</button>`;
+  if (ret === "it-board") {
+    extra += `<label style="margin:0;align-self:center">BA set ETA</label>
+      <input type="date" id="eta-input" value="${t.eta||''}" style="width:auto" />
+      <button type="button" class="primary" onclick="saveEta('${t.id}')">Save expected delivery</button>`;
+    if (t.status === "PRD / Specs")
+      extra += `<button type="button" class="ghost" onclick="go('workspace')">Open PRD / Specs workspace</button>`;
+  }
+  if (ret === "my-board" && t.status === "Sign-off")
+    extra += `<button type="button" class="success" onclick="go('signoff')">Go to sign-off</button>`;
+  document.getElementById("detail-actions").innerHTML = extra;
+  go("ticket-detail");
+}
+function exportTickets(kind) {
+  const headers = ["ID","Title","Description","Submitted","ExpectedDelivery","Priority","Status","Assignee","Requester"];
+  const lines = [headers.join(",")];
+  tickets.forEach(t => {
+    const row = [t.id,t.title,t.desc,t.submitted,t.eta||"",t.priority,t.status,t.assignee,t.requester]
+      .map(v => `"${String(v).replace(/"/g,'""')}"`);
+    lines.push(row.join(","));
+  });
+  const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = kind === "xlsx" ? "it-tickets-export.csv" : "it-tickets-export.csv";
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function toReviewFromForm() {
+  draft.title = document.getElementById("f-title").value;
+  draft.desc = document.getElementById("f-desc").value;
+  draft.urgency = document.getElementById("f-urgency").value;
+  draft.impact = document.getElementById("f-impact").value;
+  draft.complexity = document.getElementById("f-complexity").value;
+  draft.value = document.getElementById("f-value").value;
+  fillReview(); go("review");
+}
+function fillReview() {
+  document.getElementById("r-title").value = draft.title;
+  document.getElementById("r-desc").value = draft.desc;
+  document.getElementById("r-urgency").value = draft.urgency;
+  document.getElementById("r-impact").value = draft.impact;
+  document.getElementById("r-complexity").value = draft.complexity;
+  document.getElementById("r-value").value = draft.value;
+}
+function initChat() {
+  const log = document.getElementById("chat-log");
+  if (log.dataset.ready) return;
+  log.dataset.ready = "1"; draft.chatStep = 0; addBubble("bot", chatScript[0].q);
+}
+function addBubble(who, text) {
+  const el = document.createElement("div"); el.className = "bubble " + who; el.textContent = text;
+  document.getElementById("chat-log").appendChild(el); el.scrollIntoView({ behavior:"smooth", block:"end" });
+}
+function sendChat() {
+  const input = document.getElementById("chat-in"); const text = input.value.trim(); if (!text) return;
+  addBubble("user", text); input.value = "";
+  const step = chatScript[draft.chatStep];
+  if (step.key) {
+    let v = text;
+    if (step.key === "urgency") { const t = text.toUpperCase(); if (/P0|CRITICAL|STOPPED/.test(t)) v="P0"; else if (/P1|HIGH/.test(t)) v="P1"; else if (/P3|LOW|NICE/.test(t)) v="P3"; else if (/P2|NORMAL/.test(t)) v="P2"; else { const m = t.match(/P[0-3]/); v = m ? m[0] : "P2"; } }
+    if (step.key === "impact") v = /^y/i.test(text) ? "yes" : "no";
+    draft.chatAnswers[step.key] = v;
+  }
+  draft.chatStep++;
+  if (draft.chatStep < chatScript.length) {
+    setTimeout(() => {
+      addBubble("bot", chatScript[draft.chatStep].q);
+      if (!chatScript[draft.chatStep].key) {
+        document.getElementById("btn-extract").disabled = false;
+        setTimeout(() => extractToForm(), 600);
+      }
+    }, 350);
+  }
+}
+function extractToForm() {
+  draft.title = draft.chatAnswers.title || "Untitled request";
+  draft.desc = draft.chatAnswers.desc || "";
+  draft.urgency = draft.chatAnswers.urgency || "P2";
+  draft.impact = draft.chatAnswers.impact || "no";
+  draft.complexity = "med"; draft.value = "med";
+  fillReview(); go("review");
+}
+function scorePriority(u, impact, c, v) {
+  const us = { P0:40, P1:30, P2:18, P3:8 }[u] || 18;
+  const is = impact === "yes" ? 25 : 8;
+  const cs = { low:15, med:10, high:5 }[c] || 10;
+  const vs = { high:20, med:12, low:5 }[v] || 12;
+  const total = us + is + cs + vs;
+  let band = "P3"; if (total >= 85) band = "P0"; else if (total >= 70) band = "P1"; else if (total >= 50) band = "P2";
+  return { total, band, us, is, cs, vs };
+}
+function submitRequest() {
+  draft.title = document.getElementById("r-title").value;
+  draft.desc = document.getElementById("r-desc").value;
+  draft.urgency = document.getElementById("r-urgency").value;
+  draft.impact = document.getElementById("r-impact").value;
+  draft.complexity = document.getElementById("r-complexity").value;
+  draft.value = document.getElementById("r-value").value;
+  const s = scorePriority(draft.urgency, draft.impact, draft.complexity, draft.value);
+  const id = "REQ-" + (1043 + tickets.filter(t => t.id.startsWith("REQ-10")).length);
+  const today = "2026-09-23";
+  const t = { id, title:draft.title, desc:draft.desc, submitted:today, eta:"", priority:s.band, status:"PRD / Specs",
+    assignee:"Unassigned", requester:ME, complexity:draft.complexity, value:draft.value, impact:draft.impact };
+  tickets.unshift(t); activeId = id;
+  document.getElementById("prio-chips").innerHTML = ["P0","P1","P2","P3"].map(p =>
+    `<div class="prio-chip ${p===s.band?"selected":""}"><div class="lvl" style="color:var(--${p.toLowerCase()})">${prioLabel(p)}</div><div class="lbl">${p}</div></div>`).join("");
+  document.getElementById("score-box").innerHTML =
+    `<strong>Priority: ${prioLabel(s.band)} (${s.band})</strong> (score ${s.total}/100)<br>Created ${id}. Track it on My tickets.`;
+  const itBtn = document.getElementById("btn-open-it");
+  if (itBtn) itBtn.style.display = currentRole === "it" ? "" : "none";
+  showToast("Request submitted — " + id);
+  go("prio");
+}
+function renderWorkspace() {
+  const t = byId(activeId);
+  document.getElementById("ws-title").textContent = `${t.id} — workspace`;
+  document.getElementById("prd-doc").textContent = `# PRD — ${t.title}\n## Problem\n${t.desc}\n## Priority\n${t.priority}\n## HITL\nIntake → AI draft → Rules → Queue → Sign-off\n## Forbidden\nPriority override, prod deploy, access grants`;
+  document.getElementById("spec-doc").textContent = `# Specs — ${t.id}\n## Stack\nNext.js + TypeScript\n## Boards\nGET /me/tickets, GET /tickets, GET /metrics/by-status\n## Export\nGET /tickets/export?format=csv\n## Audit\ntimestamp, case_id, agent_output, human_action, override_reason, user_id`;
+}
+function closeActive() {
+  const t = byId(activeId); if (t) t.status = "Closed";
+  go("closed");
+}
+
+function saveEta(id) {
+  const t = byId(id);
+  const v = document.getElementById("eta-input").value;
+  t.eta = v;
+  t.sla_suggested_at = t.sla_suggested_at || ""; // reserved for system suggestion
+  openDetail(id, "it-board");
+  alert("Prototype: BA saved expected delivery " + (v || "(cleared)"));
+}
+
+function resetAll() {
+  tickets = JSON.parse(JSON.stringify(seed));
+  const log = document.getElementById("chat-log"); log.innerHTML = ""; delete log.dataset.ready;
+  document.getElementById("btn-extract").disabled = true;
+  draft.chatStep = 0; draft.chatAnswers = {};
+  document.querySelectorAll("nav.role button").forEach(b => b.classList.toggle("active", b.dataset.role === "requester"));
+  setRole("requester");
+}
+</script>
+</body>
+</html>
