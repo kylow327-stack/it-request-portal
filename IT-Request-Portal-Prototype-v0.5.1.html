@@ -117,7 +117,7 @@
 <main>
   <section id="landing" class="screen active">
     <div class="steps">
-      <span class="on">1. Entry</span><span>2. Capture</span><span>3. Review & Submit</span>
+      <span class="on">1. Entry</span><span>2. Capture</span><span>3. Review &amp; Submit</span>
       <span>4. Prioritize</span><span>5. Boards / PRD</span><span>6. Delivery</span><span>7. Sign-off</span>
     </div>
     <h1>How can IT help?</h1>
@@ -152,7 +152,7 @@
   <section id="chat" class="screen">
     <div class="steps"><span class="done">1. Entry</span><span class="on">2. Capture (chat)</span><span>3. Review</span></div>
     <h1>Chat intake</h1>
-    <p class="sub">Scripted Q&A — answers fill the form for check.</p>
+    <p class="sub">Scripted Q&amp;A — answers fill the form for check.</p>
     <div class="chat"><div class="chat-log" id="chat-log"></div>
       <div class="chat-input"><input id="chat-in" placeholder="Type your reply…" onkeydown="if(event.key==='Enter')sendChat()" /><button type="button" class="primary" onclick="sendChat()">Send</button></div>
     </div>
@@ -160,7 +160,7 @@
   </section>
 
   <section id="review" class="screen">
-    <div class="steps"><span class="done">1–2</span><span class="on">3. Review & Submit</span><span>4. Prioritize</span></div>
+    <div class="steps"><span class="done">1–2</span><span class="on">3. Review &amp; Submit</span><span>4. Prioritize</span></div>
     <h1>Check before submit</h1>
     <p class="sub">Edit anything wrong, then submit.</p>
     <div class="panel">
@@ -313,7 +313,7 @@
       <label>Acceptance notes</label><textarea placeholder="Looks good."></textarea>
       <div class="actions">
         <button type="button" class="ghost" onclick="go('delivery')">Needs changes</button>
-        <button type="button" class="success" onclick="closeActive()">Sign off & close</button>
+        <button type="button" class="success" onclick="closeActive()">Sign off &amp; close</button>
       </div>
     </div>
   </section>
@@ -406,7 +406,7 @@ function showItTab(tab) {
   if (tab === "queue") renderQueue();
 }
 function byId(id) { return tickets.find(t => t.id === id); }
-function esc(s) { return String(s||"").replace(/[&<>"']/g, c => ({"&":"&","<":"<",">":">","\"":""","'":"&#39;"}[c])); }
+function esc(s) { return String(s||"").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c])); }
 
 function renderMyBoard() {
   const mine = tickets.filter(t => t.requester === ME);
