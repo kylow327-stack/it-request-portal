@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { actorFromHeaders } from "@/lib/demo-users";
+import { withApi } from "@/lib/api-handler";
 import { audit } from "@/lib/audit";
 import { getTicket, upsertTicket } from "@/lib/store";
 
@@ -7,7 +8,7 @@ export const runtime = "nodejs";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-export async function POST(req: NextRequest, ctx: Ctx) {
+export const POST = withApi(async function POST(req: NextRequest, ctx: Ctx) {
   const { id } = await ctx.params;
   const actor = actorFromHeaders(req.headers);
   if (actor.role !== "Requester") {
@@ -40,4 +41,4 @@ export async function POST(req: NextRequest, ctx: Ctx) {
     payload_diff: { notes },
   });
   return NextResponse.json({ ticket });
-}
+});

@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { actorFromHeaders, isIt } from "@/lib/demo-users";
+import { withApi } from "@/lib/api-handler";
 import { readTickets } from "@/lib/store";
 import type { Status } from "@/lib/types";
 
 export const runtime = "nodejs";
 
-export async function GET(req: NextRequest) {
+export const GET = withApi(async function GET(req: NextRequest) {
   const actor = actorFromHeaders(req.headers);
   if (!isIt(actor.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -20,4 +21,4 @@ export async function GET(req: NextRequest) {
   };
   for (const t of tickets) by_status[t.status] = (by_status[t.status] || 0) + 1;
   return NextResponse.json({ by_status, total: tickets.length });
-}
+});

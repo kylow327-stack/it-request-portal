@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { actorFromHeaders, isIt } from "@/lib/demo-users";
+import { withApi } from "@/lib/api-handler";
 import { audit } from "@/lib/audit";
 import { scorePriority, suggestSlaFromPriority } from "@/lib/scoring";
+import {
+  DESCRIPTION_MAX,
+  DESCRIPTION_MIN,
+  TITLE_MAX,
+  TITLE_MIN,
+} from "@/lib/request-validation";
 import {
   emptyOverride,
   emptySignoff,
@@ -12,16 +19,16 @@ import { nextRequestId, readTickets, upsertTicket } from "@/lib/store";
 
 export const runtime = "nodejs";
 
-export async function GET(req: NextRequest) {
+export const GET = withApi(async function GET(req: NextRequest) {
   const actor = actorFromHeaders(req.headers);
   if (!isIt(actor.role)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   const tickets = await readTickets();
   return NextResponse.json({ tickets });
-}
+});
 
-export async function POST(req: NextRequest) {
+export const POST = withApi(async function POST(req: NextRequest) {
   const actor = actorFromHeaders(req.headers);
   if (actor.role !== "Requester") {
     return NextResponse.json(
@@ -30,10 +37,10 @@ export async function POST(req: NextRequest) {
     );
   }
   const body = (await req.json()) as CreateTicketInput;
-  if (!body.title || body.title.trim().length < 3) {
+  if (!body.title || body.title.trim().length < TITLE_MIN) {
     return NextResponse.json({ error: "title required (3–120)" }, { status: 400 });
   }
-  if (!body.description || body.description.trim().length < 10) {
+  if (!body.description || body.description.trim().length < DESCRIPTION_MIN) {
     return NextResponse.json(
       { error: "description required (10–5000)" },
       { status: 400 }
@@ -49,8 +56,8 @@ export async function POST(req: NextRequest) {
   const id = await nextRequestId();
   const ticket = {
     id,
-    title: body.title.trim().slice(0, 120),
-    description: body.description.trim().slice(0, 5000),
+    title: body.title.trim().slice(0, TITLE_MAX),
+    description: body.description.trim().slice(0, DESCRIPTION_MAX),
     submitted_at: now,
     expected_delivery: null as string | null,
     sla_suggested_at: suggestSlaFromPriority(scored.band),
@@ -103,4 +110,4 @@ export async function POST(req: NextRequest) {
     human_action: null,
   });
   return NextResponse.json({ ticket }, { status: 201 });
-}
+});

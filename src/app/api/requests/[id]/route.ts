@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { actorFromHeaders, isIt } from "@/lib/demo-users";
+import { withApi } from "@/lib/api-handler";
 import { audit } from "@/lib/audit";
 import { getTicket, upsertTicket } from "@/lib/store";
 import type { Status } from "@/lib/types";
@@ -8,7 +9,7 @@ export const runtime = "nodejs";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-export async function GET(req: NextRequest, ctx: Ctx) {
+export const GET = withApi(async function GET(req: NextRequest, ctx: Ctx) {
   const { id } = await ctx.params;
   const actor = actorFromHeaders(req.headers);
   const ticket = await getTicket(id);
@@ -21,9 +22,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   return NextResponse.json({ ticket });
-}
+});
 
-export async function PATCH(req: NextRequest, ctx: Ctx) {
+export const PATCH = withApi(async function PATCH(req: NextRequest, ctx: Ctx) {
   const { id } = await ctx.params;
   const actor = actorFromHeaders(req.headers);
   if (!isIt(actor.role)) {
@@ -71,4 +72,4 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     },
   });
   return NextResponse.json({ ticket });
-}
+});

@@ -52,10 +52,11 @@ Other locks carried from the prototype:
 
 ## Persistence
 
-- `data/tickets.json` — ticket records (Section 4.2). Created from seed data on first read.
-- `data/audit.jsonl` — append-only audit (Section 4.4).
+- Local `npm run dev` / `npm start`, when `data/` is writable: `data/tickets.json` (Section 4.2) and `data/audit.jsonl` (Section 4.4). Created from seed data on first read.
+- If that directory cannot be written, the store tries `/tmp/it-request-portal`, then an in-memory copy.
+- On Vercel (`VERCEL` or `VERCEL_ENV` is set) the store is in-memory and seeded once per serverless instance. It does not write the read-only project directory. Data lasts for that instance only.
 
-Those files are local demo storage. On Vercel (and any other serverless host) the project filesystem is read-only except `/tmp`, and `/tmp` is ephemeral per instance. This demo **keeps the file-backed store as-is**, so API reads and writes that touch `data/` can fail or vanish across cold starts in production. Do not treat a hosted deploy as durable. Postgres and real OIDC are intentionally not part of v0.6.
+Do not treat a hosted deploy as durable. Postgres and real OIDC are intentionally not part of v0.6. API failures return JSON `{ "error": "..." }` rather than an empty body.
 
 ## API
 
