@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { actorFromHeaders, canSetEta } from "@/lib/demo-users";
+import { withApi } from "@/lib/api-handler";
 import { audit } from "@/lib/audit";
 import { getTicket, upsertTicket } from "@/lib/store";
 
@@ -7,7 +8,7 @@ export const runtime = "nodejs";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-export async function PATCH(req: NextRequest, ctx: Ctx) {
+export const PATCH = withApi(async function PATCH(req: NextRequest, ctx: Ctx) {
   const { id } = await ctx.params;
   const actor = actorFromHeaders(req.headers);
   if (!canSetEta(actor.role)) {
@@ -36,4 +37,4 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     payload_diff: { expected_delivery: [prev, next] },
   });
   return NextResponse.json({ ticket });
-}
+});

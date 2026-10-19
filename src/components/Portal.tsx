@@ -13,6 +13,10 @@ import {
 } from "@/lib/types";
 import { headersFor } from "@/lib/api-client";
 import { DEMO } from "@/lib/demo-users";
+import {
+  requestFieldErrors,
+  type RequestFieldErrors,
+} from "@/lib/request-validation";
 
 type Screen =
   | "landing"
@@ -92,7 +96,13 @@ export default function Portal() {
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [activeId, setActiveId] = useState("REQ-1042");
   const [detailReturn, setDetailReturn] = useState<"my-board" | "it-board">("my-board");
-  const [toast, setToast] = useState("");
+  const [notice, setNotice] = useState<{
+    text: string;
+    tone: "success" | "error";
+  } | null>(null);
+  const [captureAttempted, setCaptureAttempted] = useState(false);
+  const [confirmed, setConfirmed] = useState(false);
+  const [submitError, setSubmitError] = useState("");
   const [lastScore, setLastScore] = useState<{
     band: Priority;
     total: number;
@@ -135,10 +145,24 @@ export default function Portal() {
   }, [reload]);
 
   useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(""), 4200);
+    if (!notice) return;
+    const t = setTimeout(
+      () => setNotice(null),
+      notice.tone === "error" ? 7000 : 4200
+    );
     return () => clearTimeout(t);
-  }, [toast]);
+  }, [notice]);
+
+  const fieldErrors = useMemo(
+    () => requestFieldErrors(draft.title, draft.desc),
+    [draft.title, draft.desc]
+  );
+  const fieldsValid = !fieldErrors.title && !fieldErrors.description;
+  const captureErrors: RequestFieldErrors = captureAttempted ? fieldErrors : {};
+
+  function flash(text: string, tone: "success" | "error" = "success") {
+    setNotice({ text, tone });
+  }
 
   const active = useMemo(
     () => tickets.find((t) => t.id === activeId),
@@ -180,10 +204,10 @@ export default function Portal() {
       });
       const j = await r.json();
       if (!r.ok) {
-        setToast(j.error || "ETA save failed");
+        flash(j.error || "ETA save failed", "error");
         return;
       }
-      setToast(
+      flash(
         j.ticket.expected_delivery
           ? `BA saved expected delivery ${j.ticket.expected_delivery}`
           : "BA cleared expected delivery"
@@ -207,10 +231,10 @@ export default function Portal() {
       });
       const j = await r.json();
       if (!r.ok) {
-        setToast(j.error || "Override failed");
+        flash(j.error || "Override failed", "error");
         return;
       }
-      setToast(`Priority overridden to ${overrideBand}`);
+      flash(`Priority overridden to ${overrideBand}`);
       setOverrideNote("");
       await reload();
     } finally {
@@ -218,37 +242,113 @@ export default function Portal() {
     }
   }
 
+  function beginForm() {
+    setDraft(emptyDraft());
+    setCaptureAttempted(false);
+    setConfirmed(false);
+    setSubmitError("");
+    go("form");
+  }
+
+  function beginChat() {
+    setDraft({ ...emptyDraft(), intake_channel: "chat" });
+    setChatLog([]);
+    setChatStep(0);
+    setCaptureAttempted(false);
+    setConfirmed(false);
+    setSubmitError("");
+    go("chat");
+  }
+
+  function continueToReview() {
+    setCaptureAttempted(true);
+    const errors = requestFieldErrors(draft.title, draft.desc);
+    if (errors.title || errors.description) return;
+    setConfirmed(false);
+    setSubmitError("");
+    go("review");
+  }
+
+  function showSubmitFailure(reason: string) {
+    setSubmitError(reason);
+    flash(reason, "error");
+  }
+
   async function submitRequest() {
+    const errors = requestFieldErrors(draft.title, draft.desc);
+    if (errors.title || errors.description || !confirmed) {
+      showSubmitFailure(
+        errors.description ||
+          errors.title ||
+          "Confirm that you have reviewed this request and the details are accurate."
+      );
+      return;
+    }
     setBusy(true);
+    setSubmitError("");
     try {
-      const r = await fetch("/api/requests", {
-        method: "POST",
-        headers: headersFor("requester"),
-        body: JSON.stringify({
-          title: draft.title || "Untitled request",
-          description: draft.desc || "No description provided yet.",
-          urgency: draft.urgency,
-          direct_business_impact: draft.impact === "yes",
-          complexity: draft.complexity,
-          business_value: draft.value,
-          intake_channel: draft.intake_channel,
-          requester_id: DEMO.requester.id,
-          requester_email: DEMO.requester.email,
-        }),
-      });
-      const j = await r.json();
-      if (!r.ok) {
-        setToast(j.error || "Submit failed");
+      let response: Response;
+      try {
+        response = await fetch("/api/requests", {
+          method: "POST",
+          headers: headersFor("requester"),
+          body: JSON.stringify({
+            title: draft.title.trim(),
+            description: draft.desc.trim(),
+            urgency: draft.urgency,
+            direct_business_impact: draft.impact === "yes",
+            complexity: draft.complexity,
+            business_value: draft.value,
+            intake_channel: draft.intake_channel,
+            requester_id: DEMO.requester.id,
+            requester_email: DEMO.requester.email,
+          }),
+        });
+      } catch {
+        showSubmitFailure(
+          "Could not reach the server. Check your connection and try again."
+        );
         return;
       }
-      const t = j.ticket as Ticket;
+
+      let payload: { error?: unknown; ticket?: Ticket } = {};
+      const raw = await response.text();
+      if (raw) {
+        try {
+          payload = JSON.parse(raw) as { error?: unknown; ticket?: Ticket };
+        } catch {
+          showSubmitFailure(
+            response.ok
+              ? "The server response could not be read. Try submitting again."
+              : `Submit failed (${response.status}) and the response was not readable.`
+          );
+          return;
+        }
+      }
+      if (!response.ok) {
+        const reason =
+          typeof payload.error === "string" && payload.error.trim()
+            ? payload.error
+            : `Submit failed (${response.status}).`;
+        showSubmitFailure(reason);
+        return;
+      }
+      if (!payload.ticket?.id) {
+        showSubmitFailure(
+          "The server did not return the new request. Try submitting again."
+        );
+        return;
+      }
+      const t = payload.ticket;
       setActiveId(t.id);
       setLastScore({
         band: t.priority_band,
         total: t.priority_score,
         id: t.id,
       });
-      setToast(`Request submitted — ${t.id}`);
+      setConfirmed(false);
+      setCaptureAttempted(false);
+      flash(`Request submitted — ${t.id}`);
       setRole("requester");
       setScreen("prio");
       await reload();
@@ -284,6 +384,8 @@ export default function Portal() {
         if (!chatScript[next].key) {
           setTimeout(() => {
             setDraft(nextDraft);
+            setConfirmed(false);
+            setSubmitError("");
             setScreen("review");
           }, 500);
         }
@@ -296,7 +398,11 @@ export default function Portal() {
       headers: hdr(),
     });
     if (!r.ok) {
-      setToast("Export failed");
+      const j = await r.json().catch(() => ({}));
+      flash(
+        (j && typeof j.error === "string" && j.error) || "Export failed",
+        "error"
+      );
       return;
     }
     const blob = await r.blob();
@@ -321,7 +427,7 @@ export default function Portal() {
     });
     if (!r.ok) {
       const j = await r.json();
-      setToast(j.error || "Update failed");
+      flash(j.error || "Update failed", "error");
       return;
     }
     await reload();
@@ -335,7 +441,7 @@ export default function Portal() {
     });
     const j = await r.json();
     if (!r.ok) {
-      setToast(j.error || "Sign-off failed");
+      flash(j.error || "Sign-off failed", "error");
       return;
     }
     await reload();
@@ -407,12 +513,12 @@ export default function Portal() {
             <h1 className="mb-2 text-[26px] font-semibold tracking-tight">How can IT help?</h1>
             <p className="mb-6 text-sm text-[#5b6b82]">Log a request, chat to draft one, or open your ticket board.</p>
             <div className="grid gap-3 md:grid-cols-3">
-              <Card icon="📝" title="Fill a request form" body="Structured intake with urgency, impact, complexity, and value." onClick={() => { setDraft(emptyDraft()); go("form"); }} />
-              <Card icon="💬" title="Chat with the bot" body="Answer questions; we extract into the form for your check." onClick={() => { setDraft({ ...emptyDraft(), intake_channel: "chat" }); setChatLog([]); setChatStep(0); go("chat"); }} />
+              <Card icon="📝" title="Fill a request form" body="Structured intake with urgency, impact, complexity, and value." onClick={beginForm} />
+              <Card icon="💬" title="Chat with the bot" body="Answer questions; we extract into the form for your check." onClick={beginChat} />
               <Card icon="📋" title="My tickets board" body="See requests you submitted and their current status." onClick={() => go("my-board")} />
             </div>
             <p className="mt-5 rounded-r-lg border-l-[3px] border-amber-500 bg-amber-50 px-3.5 py-3 text-xs text-amber-900">
-              Persistence + audit on disk (Section 4). Scoring U40/I25/C15/V20. ETA = BA only. Override = BA|PodLead + note.
+              Persistence + audit (local disk, in-memory on Vercel). Scoring U40/I25/C15/V20. ETA = BA only. Override = BA|PodLead + note.
             </p>
           </section>
         )}
@@ -421,12 +527,27 @@ export default function Portal() {
           <section>
             <Steps on={2} />
             <h1 className="mb-2 text-[26px] font-semibold">New IT request</h1>
+            <p className="mb-4 text-sm text-[#5b6b82]">Title needs 3–120 characters and the description needs 10–5000 before review.</p>
             <Panel>
-              <Field label="Title">
-                <input className="field" value={draft.title} placeholder="Short summary of what you need" onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
+              <Field label="Title" hint="3–120 characters" error={captureErrors.title}>
+                <input
+                  id="request-title"
+                  className={fieldClass(Boolean(captureErrors.title))}
+                  value={draft.title}
+                  placeholder="Short summary of what you need"
+                  aria-invalid={Boolean(captureErrors.title)}
+                  onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+                />
               </Field>
-              <Field label="Description">
-                <textarea className="field min-h-[90px]" value={draft.desc} placeholder="What is broken or needed? Who is affected? Since when?" onChange={(e) => setDraft({ ...draft, desc: e.target.value })} />
+              <Field label="Description" hint="10–5000 characters" error={captureErrors.description}>
+                <textarea
+                  id="request-desc"
+                  className={fieldClass(Boolean(captureErrors.description), "min-h-[90px]")}
+                  value={draft.desc}
+                  placeholder="What is broken or needed? Who is affected? Since when?"
+                  aria-invalid={Boolean(captureErrors.description)}
+                  onChange={(e) => setDraft({ ...draft, desc: e.target.value })}
+                />
               </Field>
               <div className="grid gap-3 sm:grid-cols-2">
                 <Field label="How urgent is this?">
@@ -461,7 +582,7 @@ export default function Portal() {
               </div>
               <Actions>
                 <Ghost onClick={() => go("landing")}>Back</Ghost>
-                <Primary onClick={() => go("review")}>Continue to review</Primary>
+                <Primary onClick={continueToReview}>Continue to review</Primary>
               </Actions>
             </Panel>
           </section>
@@ -490,9 +611,32 @@ export default function Portal() {
           <section>
             <Steps on={3} />
             <h1 className="mb-2 text-[26px] font-semibold">Check before submit</h1>
+            <p className="mb-4 text-sm text-[#5b6b82]">Edit the title or description if needed. Submit stays off until the details pass the checks and you confirm they are accurate.</p>
             <Panel>
-              <Field label="Title"><input className="field" value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} /></Field>
-              <Field label="Description"><textarea className="field min-h-[90px]" value={draft.desc} onChange={(e) => setDraft({ ...draft, desc: e.target.value })} /></Field>
+              <Field label="Title" hint="3–120 characters" error={fieldErrors.title}>
+                <input
+                  id="review-title"
+                  className={fieldClass(Boolean(fieldErrors.title))}
+                  value={draft.title}
+                  aria-invalid={Boolean(fieldErrors.title)}
+                  onChange={(e) => {
+                    setSubmitError("");
+                    setDraft({ ...draft, title: e.target.value });
+                  }}
+                />
+              </Field>
+              <Field label="Description" hint="10–5000 characters" error={fieldErrors.description}>
+                <textarea
+                  id="review-desc"
+                  className={fieldClass(Boolean(fieldErrors.description), "min-h-[90px]")}
+                  value={draft.desc}
+                  aria-invalid={Boolean(fieldErrors.description)}
+                  onChange={(e) => {
+                    setSubmitError("");
+                    setDraft({ ...draft, desc: e.target.value });
+                  }}
+                />
+              </Field>
               <div className="grid gap-3 sm:grid-cols-2">
                 <Field label="How urgent is this?">
                   <select className="field" value={draft.urgency} onChange={(e) => setDraft({ ...draft, urgency: e.target.value as Priority })}>
@@ -508,9 +652,50 @@ export default function Portal() {
                   </select>
                 </Field>
               </div>
+              <label className={`mt-4 flex items-start gap-2.5 rounded-lg border px-3 py-3 text-sm ${confirmed ? "border-green-600 bg-green-50" : "border-[#d8dee8] bg-[#f8fafc]"}`}>
+                <input
+                  type="checkbox"
+                  className="mt-0.5 h-4 w-4"
+                  checked={confirmed}
+                  onChange={(e) => setConfirmed(e.target.checked)}
+                />
+                <span>
+                  <span className="font-medium text-[#1a2332]">I have reviewed this request and the details are accurate.</span>
+                  <span className="mt-0.5 block text-xs text-[#5b6b82]">Required before Submit is enabled.</span>
+                </span>
+              </label>
+              {!fieldsValid && (
+                <div role="alert" className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3.5 py-3 text-sm text-red-800">
+                  <p className="font-medium">Submit is unavailable until these are fixed.</p>
+                  <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                    {fieldErrors.title && <li>{fieldErrors.title}</li>}
+                    {fieldErrors.description && <li>{fieldErrors.description}</li>}
+                  </ul>
+                </div>
+              )}
+              {fieldsValid && !confirmed && (
+                <p className="mt-3 text-sm text-[#5b6b82]">Check the confirmation above to enable Submit.</p>
+              )}
+              {submitError && (
+                <div role="alert" className="mt-3 rounded-lg border border-red-300 bg-red-50 px-3.5 py-3 text-sm font-medium text-red-800">
+                  {submitError}
+                </div>
+              )}
               <Actions>
                 <Ghost onClick={() => go("landing")}>Cancel</Ghost>
-                <Success onClick={submitRequest} disabled={busy}>Submit request</Success>
+                <Success
+                  onClick={submitRequest}
+                  disabled={busy || !confirmed || !fieldsValid}
+                  title={
+                    !fieldsValid
+                      ? fieldErrors.description || fieldErrors.title
+                      : !confirmed
+                        ? "Confirm that you have reviewed this request and the details are accurate."
+                        : undefined
+                  }
+                >
+                  {busy ? "Submitting…" : "Submit request"}
+                </Success>
               </Actions>
             </Panel>
           </section>
@@ -544,7 +729,7 @@ export default function Portal() {
             <h1 className="mb-2 text-[26px] font-semibold">My tickets</h1>
             <div className="mb-3 flex justify-between gap-2">
               <Ghost onClick={() => go("landing")}>← Home</Ghost>
-              <Primary onClick={() => { setDraft(emptyDraft()); go("form"); }}>New request</Primary>
+              <Primary onClick={beginForm}>New request</Primary>
             </div>
             <TicketTable rows={mine} onRow={(id) => openDetail(id, "my-board")} />
           </section>
@@ -719,8 +904,13 @@ export default function Portal() {
         )}
       </main>
 
-      {toast && (
-        <div className="fixed bottom-6 right-6 z-50 max-w-[360px] rounded-[10px] bg-green-800 px-4 py-3.5 text-sm text-white shadow-lg">{toast}</div>
+      {notice && (
+        <div
+          role={notice.tone === "error" ? "alert" : "status"}
+          className={`fixed bottom-6 right-6 z-50 max-w-[360px] rounded-[10px] px-4 py-3.5 text-sm text-white shadow-lg ${notice.tone === "error" ? "bg-red-800" : "bg-green-800"}`}
+        >
+          {notice.text}
+        </div>
       )}
     </div>
   );
@@ -798,11 +988,31 @@ function Panel({ children, className = "" }: { children: React.ReactNode; classN
   return <div className={`rounded-xl border border-[#d8dee8] bg-white p-5 ${className}`}>{children}</div>;
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function fieldClass(invalid: boolean, extra = "") {
+  return ["field", extra, invalid ? "invalid" : ""].filter(Boolean).join(" ");
+}
+
+function Field({
+  label,
+  hint,
+  error,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  error?: string;
+  children: React.ReactNode;
+}) {
   return (
     <label className="mb-1 mt-3.5 block text-xs text-[#5b6b82]">
       {label}
+      {hint && <span className="mt-0.5 block">{hint}</span>}
       <div className="mt-1.5">{children}</div>
+      {error && (
+        <span role="alert" className="mt-1.5 block text-xs font-medium text-red-700">
+          {error}
+        </span>
+      )}
     </label>
   );
 }
@@ -827,9 +1037,19 @@ function Ghost({ children, onClick }: { children: React.ReactNode; onClick?: () 
   );
 }
 
-function Success({ children, onClick, disabled }: { children: React.ReactNode; onClick?: () => void; disabled?: boolean }) {
+function Success({
+  children,
+  onClick,
+  disabled,
+  title,
+}: {
+  children: React.ReactNode;
+  onClick?: () => void;
+  disabled?: boolean;
+  title?: string;
+}) {
   return (
-    <button type="button" disabled={disabled} onClick={onClick} className="rounded-lg bg-green-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">
+    <button type="button" disabled={disabled} title={title} onClick={onClick} className="rounded-lg bg-green-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-50">
       {children}
     </button>
   );

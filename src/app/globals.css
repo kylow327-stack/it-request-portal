@@ -25,3 +25,12 @@ body {
   outline: 2px solid #2563eb;
   outline-offset: 1px;
 }
+
+.field.invalid {
+  border-color: #b91c1c;
+  background: #fef2f2;
+}
+
+.field.invalid:focus {
+  outline-color: #b91c1c;
+}
