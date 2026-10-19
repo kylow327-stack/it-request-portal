@@ -104,7 +104,7 @@ function contentKey(snapshot: DraftSnapshot): string {
   });
 }
 
-function parseStored(raw: string, now: number): StoredDraft | null {
+function parseStored(raw: string): StoredDraft | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -114,7 +114,6 @@ function parseStored(raw: string, now: number): StoredDraft | null {
   if (!parsed || typeof parsed !== "object") return null;
   const row = parsed as Record<string, unknown>;
   if (typeof row.savedAt !== "number" || !Number.isFinite(row.savedAt)) return null;
-  if (now - row.savedAt >= DRAFT_TTL_MS) return null;
   if (!isDraft(row.draft)) return null;
   return {
     savedAt: row.savedAt,
@@ -131,6 +130,10 @@ function parseStored(raw: string, now: number): StoredDraft | null {
     chatLog: parseChatLog(row.chatLog),
     chatIn: typeof row.chatIn === "string" ? row.chatIn : "",
   };
+}
+
+function isExpired(savedAt: number, now: number): boolean {
+  return now - savedAt >= DRAFT_TTL_MS;
 }
 
 export function sessionStorageOrNull(): Storage | null {
@@ -150,8 +153,8 @@ export function readStoredDraft(storage: Storage, now = Date.now()): StoredDraft
     return null;
   }
   if (!raw) return null;
-  const stored = parseStored(raw, now);
-  if (!stored) {
+  const stored = parseStored(raw);
+  if (!stored || isExpired(stored.savedAt, now)) {
     try {
       storage.removeItem(DRAFT_STORAGE_KEY);
     } catch {
@@ -175,7 +178,9 @@ export function writeStoredDraft(
     }
     const existingRaw = storage.getItem(DRAFT_STORAGE_KEY);
     if (existingRaw) {
-      const existing = parseStored(existingRaw, now);
+      const existing = parseStored(existingRaw);
+      // Same fields keep the original savedAt. That includes an already
+      // expired record, so closing or refreshing the tab cannot renew the TTL.
       if (existing && contentKey(existing) === contentKey(normalized)) return;
     }
     const payload: StoredDraft = { savedAt: now, ...normalized };

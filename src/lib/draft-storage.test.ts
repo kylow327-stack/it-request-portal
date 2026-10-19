@@ -101,6 +101,32 @@ describe("draft storage", () => {
     assert.equal(restored.savedAt, 1_000);
   });
 
+  it("does not renew an expired draft when the same snapshot is written again", () => {
+    const storage = new MemoryStorage();
+    const now = 1_700_000_000_000;
+    const snapshot = filledSnapshot();
+    writeStoredDraft(storage, snapshot, now);
+
+    const raw = storage.getItem(DRAFT_STORAGE_KEY);
+    assert.ok(raw);
+    const expiredAt = now - DRAFT_TTL_MS - 1;
+    const stored = JSON.parse(raw) as { savedAt: number };
+    stored.savedAt = expiredAt;
+    storage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(stored));
+
+    writeStoredDraft(storage, snapshot, now);
+    assert.equal(readStoredDraft(storage, now), null);
+
+    const changed = filledSnapshot({
+      draft: { ...snapshot.draft, title: "VPN still down" },
+    });
+    writeStoredDraft(storage, changed, now);
+    const renewed = readStoredDraft(storage, now);
+    assert.ok(renewed);
+    assert.equal(renewed.savedAt, now);
+    assert.equal(renewed.draft.title, "VPN still down");
+  });
+
   it("refreshes savedAt when the draft changes", () => {
     const storage = new MemoryStorage();
     writeStoredDraft(storage, filledSnapshot(), 1_000);
