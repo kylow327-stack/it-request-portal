@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   PRIORITY_LABEL,
   PRIORITY_SHORT,
@@ -13,6 +13,17 @@ import {
 } from "@/lib/types";
 import { headersFor } from "@/lib/api-client";
 import { DEMO } from "@/lib/demo-users";
+import {
+  DRAFT_RESTORED_TOAST,
+  clearStoredDraft,
+  emptyDraft,
+  isPristineSnapshot,
+  readStoredDraft,
+  sessionStorageOrNull,
+  writeStoredDraft,
+  type ChatLine,
+  type DraftSnapshot,
+} from "@/lib/draft-storage";
 
 type Screen =
   | "landing"
@@ -27,16 +38,6 @@ type Screen =
   | "delivery"
   | "signoff"
   | "closed";
-
-const emptyDraft = (): Draft => ({
-  title: "",
-  desc: "",
-  urgency: "P2",
-  impact: "yes",
-  complexity: "med",
-  value: "med",
-  intake_channel: "form",
-});
 
 const chatScript: { q: string; key: keyof Draft | null }[] = [
   { q: "Hi — in one line, what do you need help with?", key: "title" },
@@ -89,7 +90,7 @@ export default function Portal() {
   const [screen, setScreen] = useState<Screen>("landing");
   const [itTab, setItTab] = useState<"board" | "dash" | "queue" | "audit">("board");
   const [tickets, setTickets] = useState<Ticket[]>([]);
-  const [draft, setDraft] = useState<Draft>(emptyDraft);
+  const [draft, setDraft] = useState<Draft>(() => emptyDraft());
   const [activeId, setActiveId] = useState("REQ-1042");
   const [detailReturn, setDetailReturn] = useState<"my-board" | "it-board">("my-board");
   const [toast, setToast] = useState("");
@@ -99,8 +100,17 @@ export default function Portal() {
     id: string;
   } | null>(null);
   const [chatStep, setChatStep] = useState(0);
-  const [chatLog, setChatLog] = useState<{ who: "bot" | "user"; text: string }[]>([]);
+  const [chatLog, setChatLog] = useState<ChatLine[]>([]);
   const [chatIn, setChatIn] = useState("");
+  const [storageReady, setStorageReady] = useState(false);
+  const suppressSave = useRef(false);
+  const snapshotRef = useRef<DraftSnapshot>({
+    draft,
+    chatStep,
+    chatLog,
+    chatIn,
+  });
+  snapshotRef.current = { draft, chatStep, chatLog, chatIn };
   const [filter, setFilter] = useState("all");
   const [etaInput, setEtaInput] = useState("");
   const [overrideNote, setOverrideNote] = useState("");
@@ -139,6 +149,66 @@ export default function Portal() {
     const t = setTimeout(() => setToast(""), 4200);
     return () => clearTimeout(t);
   }, [toast]);
+
+  useEffect(() => {
+    const storage = sessionStorageOrNull();
+    if (storage) {
+      const saved = readStoredDraft(storage);
+      if (saved && !isPristineSnapshot(saved)) {
+        setDraft(saved.draft);
+        setChatStep(Math.min(saved.chatStep, chatScript.length));
+        setChatLog(saved.chatLog);
+        setChatIn(saved.chatIn);
+        setToast(DRAFT_RESTORED_TOAST);
+      } else if (saved) {
+        clearStoredDraft(storage);
+      }
+    }
+    setStorageReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!storageReady) return;
+    const storage = sessionStorageOrNull();
+    if (!storage) return;
+    if (suppressSave.current) {
+      suppressSave.current = false;
+      clearStoredDraft(storage);
+      return;
+    }
+    const t = window.setTimeout(() => {
+      if (suppressSave.current) return;
+      const current = sessionStorageOrNull();
+      if (!current) return;
+      writeStoredDraft(current, snapshotRef.current);
+    }, 300);
+    return () => window.clearTimeout(t);
+  }, [storageReady, draft, chatStep, chatLog, chatIn]);
+
+  useEffect(() => {
+    if (!storageReady) return;
+    const flush = () => {
+      if (suppressSave.current) return;
+      const storage = sessionStorageOrNull();
+      if (!storage) return;
+      writeStoredDraft(storage, snapshotRef.current);
+    };
+    window.addEventListener("pagehide", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      flush();
+    };
+  }, [storageReady, screen]);
+
+  function discardSavedDraft() {
+    suppressSave.current = true;
+    const storage = sessionStorageOrNull();
+    if (storage) clearStoredDraft(storage);
+    setDraft(emptyDraft());
+    setChatStep(0);
+    setChatLog([]);
+    setChatIn("");
+  }
 
   const active = useMemo(
     () => tickets.find((t) => t.id === activeId),
@@ -248,6 +318,7 @@ export default function Portal() {
         total: t.priority_score,
         id: t.id,
       });
+      discardSavedDraft();
       setToast(`Request submitted — ${t.id}`);
       setRole("requester");
       setScreen("prio");
@@ -407,8 +478,11 @@ export default function Portal() {
             <h1 className="mb-2 text-[26px] font-semibold tracking-tight">How can IT help?</h1>
             <p className="mb-6 text-sm text-[#5b6b82]">Log a request, chat to draft one, or open your ticket board.</p>
             <div className="grid gap-3 md:grid-cols-3">
-              <Card icon="📝" title="Fill a request form" body="Structured intake with urgency, impact, complexity, and value." onClick={() => { setDraft(emptyDraft()); go("form"); }} />
-              <Card icon="💬" title="Chat with the bot" body="Answer questions; we extract into the form for your check." onClick={() => { setDraft({ ...emptyDraft(), intake_channel: "chat" }); setChatLog([]); setChatStep(0); go("chat"); }} />
+              <Card icon="📝" title="Fill a request form" body="Structured intake with urgency, impact, complexity, and value." onClick={() => go("form")} />
+              <Card icon="💬" title="Chat with the bot" body="Answer questions; we extract into the form for your check." onClick={() => {
+                if (chatLog.length === 0) setDraft((d) => ({ ...d, intake_channel: "chat" }));
+                go("chat");
+              }} />
               <Card icon="📋" title="My tickets board" body="See requests you submitted and their current status." onClick={() => go("my-board")} />
             </div>
             <p className="mt-5 rounded-r-lg border-l-[3px] border-amber-500 bg-amber-50 px-3.5 py-3 text-xs text-amber-900">
@@ -544,7 +618,7 @@ export default function Portal() {
             <h1 className="mb-2 text-[26px] font-semibold">My tickets</h1>
             <div className="mb-3 flex justify-between gap-2">
               <Ghost onClick={() => go("landing")}>← Home</Ghost>
-              <Primary onClick={() => { setDraft(emptyDraft()); go("form"); }}>New request</Primary>
+              <Primary onClick={() => { discardSavedDraft(); go("form"); }}>New request</Primary>
             </div>
             <TicketTable rows={mine} onRow={(id) => openDetail(id, "my-board")} />
           </section>
