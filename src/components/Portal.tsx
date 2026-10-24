@@ -24,6 +24,10 @@ import {
   type ChatLine,
   type DraftSnapshot,
 } from "@/lib/draft-storage";
+import {
+  draftFieldErrors,
+  type DraftFieldErrors,
+} from "@/lib/intake-validation";
 
 type Screen =
   | "landing"
@@ -38,6 +42,9 @@ type Screen =
   | "delivery"
   | "signoff"
   | "closed";
+
+type ToastTone = "success" | "error" | "info";
+type ToastState = { text: string; tone: ToastTone };
 
 const chatScript: { q: string; key: keyof Draft | null }[] = [
   { q: "Hi — in one line, what do you need help with?", key: "title" },
@@ -55,6 +62,23 @@ const chatScript: { q: string; key: keyof Draft | null }[] = [
     key: null,
   },
 ];
+
+const URGENCY_CHIPS: { label: string; value: Priority; reply: string }[] = [
+  { label: "Critical", value: "P0", reply: "Critical — work stopped" },
+  { label: "High", value: "P1", reply: "High — needed this week" },
+  { label: "Normal", value: "P2", reply: "Normal — planned work" },
+  { label: "Low", value: "P3", reply: "Low — nice to have" },
+];
+
+const IMPACT_CHIPS: { label: string; value: "yes" | "no"; reply: string }[] = [
+  { label: "Yes — direct impact", value: "yes", reply: "Yes" },
+  { label: "No — not direct", value: "no", reply: "No" },
+];
+
+const COMPLEXITY_HELP =
+  "Low = small change (password, access). Medium = known fix or config. High = new build or unknown root cause.";
+const VALUE_HELP =
+  "High = revenue, customers, or critical ops. Medium = team productivity. Low = nice-to-have polish.";
 
 function statusClass(s: Status) {
   return (
@@ -93,7 +117,9 @@ export default function Portal() {
   const [draft, setDraft] = useState<Draft>(() => emptyDraft());
   const [activeId, setActiveId] = useState("REQ-1042");
   const [detailReturn, setDetailReturn] = useState<"my-board" | "it-board">("my-board");
-  const [toast, setToast] = useState("");
+  const [toast, setToast] = useState<ToastState | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<DraftFieldErrors>({});
+  const [signoffNotes, setSignoffNotes] = useState("");
   const [lastScore, setLastScore] = useState<{
     band: Priority;
     total: number;
@@ -144,9 +170,13 @@ export default function Portal() {
     reload().catch(console.error);
   }, [reload]);
 
+  function showToast(text: string, tone: ToastTone = "success") {
+    setToast({ text, tone });
+  }
+
   useEffect(() => {
     if (!toast) return;
-    const t = setTimeout(() => setToast(""), 4200);
+    const t = setTimeout(() => setToast(null), 4200);
     return () => clearTimeout(t);
   }, [toast]);
 
@@ -159,7 +189,7 @@ export default function Portal() {
         setChatStep(Math.min(saved.chatStep, chatScript.length));
         setChatLog(saved.chatLog);
         setChatIn(saved.chatIn);
-        setToast(DRAFT_RESTORED_TOAST);
+        showToast(DRAFT_RESTORED_TOAST, "info");
       } else if (saved) {
         clearStoredDraft(storage);
       }
@@ -250,13 +280,14 @@ export default function Portal() {
       });
       const j = await r.json();
       if (!r.ok) {
-        setToast(j.error || "ETA save failed");
+        showToast(j.error || "ETA save failed", "error");
         return;
       }
-      setToast(
+      showToast(
         j.ticket.expected_delivery
           ? `BA saved expected delivery ${j.ticket.expected_delivery}`
-          : "BA cleared expected delivery"
+          : "BA cleared expected delivery",
+        "success"
       );
       await reload();
     } finally {
@@ -277,10 +308,10 @@ export default function Portal() {
       });
       const j = await r.json();
       if (!r.ok) {
-        setToast(j.error || "Override failed");
+        showToast(j.error || "Override failed", "error");
         return;
       }
-      setToast(`Priority overridden to ${overrideBand}`);
+      showToast(`Priority overridden to ${overrideBand}`, "success");
       setOverrideNote("");
       await reload();
     } finally {
@@ -288,15 +319,31 @@ export default function Portal() {
     }
   }
 
+  function validateDraftOrToast(): boolean {
+    const errors = draftFieldErrors(draft);
+    setFieldErrors(errors);
+    if (Object.keys(errors).length) {
+      showToast("Please fix the highlighted fields before continuing.", "error");
+      return false;
+    }
+    return true;
+  }
+
+  function continueToReview() {
+    if (!validateDraftOrToast()) return;
+    go("review");
+  }
+
   async function submitRequest() {
+    if (!validateDraftOrToast()) return;
     setBusy(true);
     try {
       const r = await fetch("/api/requests", {
         method: "POST",
         headers: headersFor("requester"),
         body: JSON.stringify({
-          title: draft.title || "Untitled request",
-          description: draft.desc || "No description provided yet.",
+          title: draft.title.trim(),
+          description: draft.desc.trim(),
           urgency: draft.urgency,
           direct_business_impact: draft.impact === "yes",
           complexity: draft.complexity,
@@ -308,7 +355,7 @@ export default function Portal() {
       });
       const j = await r.json();
       if (!r.ok) {
-        setToast(j.error || "Submit failed");
+        showToast(j.error || "Submit failed", "error");
         return;
       }
       const t = j.ticket as Ticket;
@@ -319,7 +366,8 @@ export default function Portal() {
         id: t.id,
       });
       discardSavedDraft();
-      setToast(`Request submitted — ${t.id}`);
+      setFieldErrors({});
+      showToast(`Request submitted — ${t.id}`, "success");
       setRole("requester");
       setScreen("prio");
       await reload();
@@ -328,22 +376,33 @@ export default function Portal() {
     }
   }
 
-  function sendChat() {
-    const text = chatIn.trim();
+  function sendChat(textOverride?: string) {
+    const text = (textOverride ?? chatIn).trim();
     if (!text) return;
     const step = chatScript[chatStep];
     const nextDraft = { ...draft, intake_channel: "chat" as const };
     if (step.key === "title") nextDraft.title = text;
     if (step.key === "desc") nextDraft.desc = text;
     if (step.key === "urgency") {
-      const t = text.toUpperCase();
-      if (/P0|CRITICAL|STOPPED/.test(t)) nextDraft.urgency = "P0";
-      else if (/P1|HIGH/.test(t)) nextDraft.urgency = "P1";
-      else if (/P3|LOW|NICE/.test(t)) nextDraft.urgency = "P3";
-      else nextDraft.urgency = "P2";
+      const chip = URGENCY_CHIPS.find(
+        (c) => c.reply === text || c.label === text || c.value === (text as Priority)
+      );
+      if (chip) nextDraft.urgency = chip.value;
+      else {
+        const t = text.toUpperCase();
+        if (/P0|CRITICAL|STOPPED/.test(t)) nextDraft.urgency = "P0";
+        else if (/P1|HIGH/.test(t)) nextDraft.urgency = "P1";
+        else if (/P3|LOW|NICE/.test(t)) nextDraft.urgency = "P3";
+        else nextDraft.urgency = "P2";
+      }
     }
-    if (step.key === "impact")
-      nextDraft.impact = /^y/i.test(text) ? "yes" : "no";
+    if (step.key === "impact") {
+      const chip = IMPACT_CHIPS.find(
+        (c) => c.reply === text || c.label === text || c.value === text.toLowerCase()
+      );
+      if (chip) nextDraft.impact = chip.value;
+      else nextDraft.impact = /^y/i.test(text) ? "yes" : "no";
+    }
     setDraft(nextDraft);
     setChatLog((l) => [...l, { who: "user", text }]);
     setChatIn("");
@@ -355,6 +414,7 @@ export default function Portal() {
         if (!chatScript[next].key) {
           setTimeout(() => {
             setDraft(nextDraft);
+            setFieldErrors({});
             setScreen("review");
           }, 500);
         }
@@ -367,7 +427,7 @@ export default function Portal() {
       headers: hdr(),
     });
     if (!r.ok) {
-      setToast("Export failed");
+      showToast("Export failed", "error");
       return;
     }
     const blob = await r.blob();
@@ -392,26 +452,35 @@ export default function Portal() {
     });
     if (!r.ok) {
       const j = await r.json();
-      setToast(j.error || "Update failed");
+      showToast(j.error || "Update failed", "error");
       return;
     }
     await reload();
   }
 
   async function doSignoff(accepted: boolean) {
+    const notes =
+      signoffNotes.trim() ||
+      (accepted ? "Looks good." : "Needs changes");
     const r = await fetch(`/api/requests/${activeId}/signoff`, {
       method: "POST",
       headers: headersFor("requester"),
-      body: JSON.stringify({ accepted, notes: accepted ? "Looks good." : "Needs changes" }),
+      body: JSON.stringify({ accepted, notes }),
     });
     const j = await r.json();
     if (!r.ok) {
-      setToast(j.error || "Sign-off failed");
+      showToast(j.error || "Sign-off failed", "error");
       return;
     }
+    setSignoffNotes("");
     await reload();
-    if (accepted) go("closed");
-    else go("delivery");
+    if (accepted) {
+      showToast("Request signed off and closed", "success");
+      go("closed");
+    } else {
+      showToast("Sent back for changes", "info");
+      go("delivery");
+    }
   }
 
   const mine = tickets.filter(
@@ -478,15 +547,28 @@ export default function Portal() {
             <h1 className="mb-2 text-[26px] font-semibold tracking-tight">How can IT help?</h1>
             <p className="mb-6 text-sm text-[#5b6b82]">Log a request, chat to draft one, or open your ticket board.</p>
             <div className="grid gap-3 md:grid-cols-3">
-              <Card icon="📝" title="Fill a request form" body="Structured intake with urgency, impact, complexity, and value." onClick={() => go("form")} />
+              <Card icon="📝" title="Fill a request form" body="Structured intake with urgency, impact, complexity, and value." onClick={() => { setFieldErrors({}); go("form"); }} />
               <Card icon="💬" title="Chat with the bot" body="Answer questions; we extract into the form for your check." onClick={() => {
                 if (chatLog.length === 0) setDraft((d) => ({ ...d, intake_channel: "chat" }));
+                setFieldErrors({});
                 go("chat");
               }} />
               <Card icon="📋" title="My tickets board" body="See requests you submitted and their current status." onClick={() => go("my-board")} />
             </div>
-            <p className="mt-5 rounded-r-lg border-l-[3px] border-amber-500 bg-amber-50 px-3.5 py-3 text-xs text-amber-900">
-              Persistence + audit on disk (Section 4). Scoring U40/I25/C15/V20. ETA = BA only. Override = BA|PodLead + note.
+            <p className="mt-5 rounded-r-lg border-l-[3px] border-blue-500 bg-blue-50 px-3.5 py-3 text-xs text-blue-950">
+              Your answers help IT prioritize. You will review everything before it is submitted.{" "}
+              <button
+                type="button"
+                className="text-blue-700 underline"
+                onClick={() =>
+                  showToast(
+                    "Priority uses urgency, impact, complexity, and value. IT may adjust with a written reason.",
+                    "info"
+                  )
+                }
+              >
+                How priority works
+              </button>
             </p>
           </section>
         )}
@@ -496,11 +578,27 @@ export default function Portal() {
             <Steps on={2} />
             <h1 className="mb-2 text-[26px] font-semibold">New IT request</h1>
             <Panel>
-              <Field label="Title">
-                <input className="field" value={draft.title} placeholder="Short summary of what you need" onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
+              <Field label="Title" error={fieldErrors.title}>
+                <input
+                  className={`field ${fieldErrors.title ? "border-red-500" : ""}`}
+                  value={draft.title}
+                  placeholder="Short summary of what you need"
+                  onChange={(e) => {
+                    setDraft({ ...draft, title: e.target.value });
+                    if (fieldErrors.title) setFieldErrors((fe) => ({ ...fe, title: undefined }));
+                  }}
+                />
               </Field>
-              <Field label="Description">
-                <textarea className="field min-h-[90px]" value={draft.desc} placeholder="What is broken or needed? Who is affected? Since when?" onChange={(e) => setDraft({ ...draft, desc: e.target.value })} />
+              <Field label="Description" error={fieldErrors.desc}>
+                <textarea
+                  className={`field min-h-[90px] ${fieldErrors.desc ? "border-red-500" : ""}`}
+                  value={draft.desc}
+                  placeholder="What is broken or needed? Who is affected? Since when?"
+                  onChange={(e) => {
+                    setDraft({ ...draft, desc: e.target.value });
+                    if (fieldErrors.desc) setFieldErrors((fe) => ({ ...fe, desc: undefined }));
+                  }}
+                />
               </Field>
               <div className="grid gap-3 sm:grid-cols-2">
                 <Field label="How urgent is this?">
@@ -518,14 +616,14 @@ export default function Portal() {
                 </Field>
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
-                <Field label="Complexity">
+                <Field label="Complexity" hint={COMPLEXITY_HELP}>
                   <select className="field" value={draft.complexity} onChange={(e) => setDraft({ ...draft, complexity: e.target.value as Draft["complexity"] })}>
                     <option value="low">Low</option>
                     <option value="med">Medium</option>
                     <option value="high">High</option>
                   </select>
                 </Field>
-                <Field label="Business value">
+                <Field label="Business value" hint={VALUE_HELP}>
                   <select className="field" value={draft.value} onChange={(e) => setDraft({ ...draft, value: e.target.value as Draft["value"] })}>
                     <option value="high">High</option>
                     <option value="med">Medium</option>
@@ -535,7 +633,7 @@ export default function Portal() {
               </div>
               <Actions>
                 <Ghost onClick={() => go("landing")}>Back</Ghost>
-                <Primary onClick={() => go("review")}>Continue to review</Primary>
+                <Primary onClick={continueToReview}>Continue to review</Primary>
               </Actions>
             </Panel>
           </section>
@@ -551,9 +649,37 @@ export default function Portal() {
                   <div key={i} className={`max-w-[80%] rounded-xl px-3.5 py-2.5 text-sm leading-snug ${b.who === "bot" ? "self-start bg-[#eef2f7]" : "self-end bg-blue-600 text-white"}`}>{b.text}</div>
                 ))}
               </div>
+              {chatScript[chatStep]?.key === "urgency" && (
+                <div className="flex flex-wrap gap-2 border-t border-[#d8dee8] px-3 pt-3">
+                  {URGENCY_CHIPS.map((chip) => (
+                    <button
+                      key={chip.value}
+                      type="button"
+                      className="rounded-lg border border-[#d8dee8] bg-[#eef2f7] px-3 py-1.5 text-sm text-[#1a2332] hover:border-blue-600"
+                      onClick={() => sendChat(chip.reply)}
+                    >
+                      {chip.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {chatScript[chatStep]?.key === "impact" && (
+                <div className="flex flex-wrap gap-2 border-t border-[#d8dee8] px-3 pt-3">
+                  {IMPACT_CHIPS.map((chip) => (
+                    <button
+                      key={chip.value}
+                      type="button"
+                      className="rounded-lg border border-[#d8dee8] bg-[#eef2f7] px-3 py-1.5 text-sm text-[#1a2332] hover:border-blue-600"
+                      onClick={() => sendChat(chip.reply)}
+                    >
+                      {chip.label}
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="flex gap-2 border-t border-[#d8dee8] p-3">
                 <input className="field flex-1" value={chatIn} placeholder="Type your reply…" onChange={(e) => setChatIn(e.target.value)} onKeyDown={(e) => e.key === "Enter" && sendChat()} />
-                <Primary onClick={sendChat}>Send</Primary>
+                <Primary onClick={() => sendChat()}>Send</Primary>
               </div>
             </div>
             <Actions><Ghost onClick={() => go("landing")}>Back</Ghost></Actions>
@@ -565,8 +691,26 @@ export default function Portal() {
             <Steps on={3} />
             <h1 className="mb-2 text-[26px] font-semibold">Check before submit</h1>
             <Panel>
-              <Field label="Title"><input className="field" value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} /></Field>
-              <Field label="Description"><textarea className="field min-h-[90px]" value={draft.desc} onChange={(e) => setDraft({ ...draft, desc: e.target.value })} /></Field>
+              <Field label="Title" error={fieldErrors.title}>
+                <input
+                  className={`field ${fieldErrors.title ? "border-red-500" : ""}`}
+                  value={draft.title}
+                  onChange={(e) => {
+                    setDraft({ ...draft, title: e.target.value });
+                    if (fieldErrors.title) setFieldErrors((fe) => ({ ...fe, title: undefined }));
+                  }}
+                />
+              </Field>
+              <Field label="Description" error={fieldErrors.desc}>
+                <textarea
+                  className={`field min-h-[90px] ${fieldErrors.desc ? "border-red-500" : ""}`}
+                  value={draft.desc}
+                  onChange={(e) => {
+                    setDraft({ ...draft, desc: e.target.value });
+                    if (fieldErrors.desc) setFieldErrors((fe) => ({ ...fe, desc: undefined }));
+                  }}
+                />
+              </Field>
               <div className="grid gap-3 sm:grid-cols-2">
                 <Field label="How urgent is this?">
                   <select className="field" value={draft.urgency} onChange={(e) => setDraft({ ...draft, urgency: e.target.value as Priority })}>
@@ -579,6 +723,22 @@ export default function Portal() {
                   <select className="field" value={draft.impact} onChange={(e) => setDraft({ ...draft, impact: e.target.value as "yes" | "no" })}>
                     <option value="yes">Yes</option>
                     <option value="no">No</option>
+                  </select>
+                </Field>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field label="Complexity" hint={COMPLEXITY_HELP}>
+                  <select className="field" value={draft.complexity} onChange={(e) => setDraft({ ...draft, complexity: e.target.value as Draft["complexity"] })}>
+                    <option value="low">Low</option>
+                    <option value="med">Medium</option>
+                    <option value="high">High</option>
+                  </select>
+                </Field>
+                <Field label="Business value" hint={VALUE_HELP}>
+                  <select className="field" value={draft.value} onChange={(e) => setDraft({ ...draft, value: e.target.value as Draft["value"] })}>
+                    <option value="high">High</option>
+                    <option value="med">Medium</option>
+                    <option value="low">Low</option>
                   </select>
                 </Field>
               </div>
@@ -710,25 +870,38 @@ export default function Portal() {
                 <Ghost onClick={() => go(detailReturn)}>← {detailReturn === "it-board" ? "IT board" : "My board"}</Ghost>
                 {detailReturn === "it-board" && (
                   <>
+                    <div className="w-full basis-full rounded-lg bg-[#eef2f7] px-3 py-2 text-xs text-[#5b6b82]">
+                      {itRole === "BA"
+                        ? "Acting as BA — you can set expected delivery and override priority (with a reason)."
+                        : itRole === "PodLead"
+                          ? "Acting as Pod Lead — you can override priority with a reason. Only BA can set expected delivery."
+                          : "Acting as Engineer — ETA and priority override are locked. Switch Act as to BA or Pod Lead to change them."}
+                    </div>
                     <label className="self-center text-xs text-[#5b6b82]">BA set ETA</label>
-                    <input type="date" className="field w-auto" value={etaInput} onChange={(e) => setEtaInput(e.target.value)} />
+                    <input type="date" className="field w-auto" value={etaInput} onChange={(e) => setEtaInput(e.target.value)} disabled={itRole !== "BA"} />
                     <Primary onClick={saveEta} disabled={busy || itRole !== "BA"}>Save expected delivery</Primary>
+                    {itRole !== "BA" && (
+                      <span className="self-center text-xs text-amber-800">Only BA can set ETA.</span>
+                    )}
                     {active.sla_suggested_at && <Ghost onClick={() => setEtaInput(active.sla_suggested_at!)}>Use SLA suggestion</Ghost>}
                     {active.status === "PRD / Specs" && <Ghost onClick={() => go("workspace")}>Open PRD / Specs workspace</Ghost>}
                     <div className="w-full basis-full" />
                     <Field label="Priority override (BA / Pod Lead — reason required)">
                       <div className="flex flex-wrap gap-2">
-                        <select className="field w-auto" value={overrideBand} onChange={(e) => setOverrideBand(e.target.value as Priority)}>
+                        <select className="field w-auto" value={overrideBand} onChange={(e) => setOverrideBand(e.target.value as Priority)} disabled={itRole !== "BA" && itRole !== "PodLead"}>
                           {(["P0", "P1", "P2", "P3"] as Priority[]).map((p) => <option key={p} value={p}>{p} — {PRIORITY_SHORT[p]}</option>)}
                         </select>
-                        <input className="field flex-1" value={overrideNote} placeholder="Mandatory override note" onChange={(e) => setOverrideNote(e.target.value)} />
+                        <input className="field flex-1" value={overrideNote} placeholder="Mandatory override note" onChange={(e) => setOverrideNote(e.target.value)} disabled={itRole !== "BA" && itRole !== "PodLead"} />
                         <Primary onClick={applyOverride} disabled={busy || (itRole !== "BA" && itRole !== "PodLead")}>Apply override</Primary>
                       </div>
+                      {itRole !== "BA" && itRole !== "PodLead" && (
+                        <p className="mt-1.5 text-xs text-amber-800">Only BA or Pod Lead can override priority.</p>
+                      )}
                     </Field>
                   </>
                 )}
                 {detailReturn === "my-board" && active.status === "Sign-off" && (
-                  <Success onClick={() => go("signoff")}>Go to sign-off</Success>
+                  <Success onClick={() => { setSignoffNotes(""); go("signoff"); }}>Go to sign-off</Success>
                 )}
               </Actions>
             </Panel>
@@ -761,16 +934,35 @@ export default function Portal() {
             <Panel>
               <p><strong>{active.id}</strong> — {active.title}<br /><span className="text-sm text-[#5b6b82]">ETA: {active.expected_delivery || "TBD"} · Status: {active.status}</span></p>
               <Actions>
-                <Primary onClick={async () => { await patchStatus("Sign-off"); go("signoff"); }}>Request user sign-off</Primary>
+                <Primary onClick={async () => { await patchStatus("Sign-off"); setSignoffNotes(""); go("signoff"); }}>Request user sign-off</Primary>
               </Actions>
             </Panel>
           </section>
         )}
 
-        {screen === "signoff" && (
+        {screen === "signoff" && active && (
           <section>
             <h1 className="mb-2 text-[26px] font-semibold">Requester sign-off</h1>
             <Panel>
+              <div className="mb-4 grid grid-cols-[140px_1fr] gap-x-3 gap-y-2 text-sm">
+                {([
+                  ["Request", `${active.id} — ${active.title}`],
+                  ["Description", active.description],
+                  ["Expected delivery", active.expected_delivery || "Not set"],
+                  ["Priority", `${PRIORITY_SHORT[active.priority_band]} (${active.priority_band})`],
+                  ["Status", active.status],
+                ] as const).map(([k, v]) => (
+                  <div key={k} className="contents"><div className="text-[#5b6b82]">{k}</div><div>{v}</div></div>
+                ))}
+              </div>
+              <Field label="Notes for IT (optional)">
+                <textarea
+                  className="field min-h-[72px]"
+                  value={signoffNotes}
+                  placeholder={active.status === "Sign-off" ? "Anything IT should know before you close or send back…" : "Optional notes"}
+                  onChange={(e) => setSignoffNotes(e.target.value)}
+                />
+              </Field>
               <Actions>
                 <Ghost onClick={() => doSignoff(false)}>Needs changes</Ghost>
                 <Success onClick={() => doSignoff(true)}>Sign off & close</Success>
@@ -794,7 +986,18 @@ export default function Portal() {
       </main>
 
       {toast && (
-        <div className="fixed bottom-6 right-6 z-50 max-w-[360px] rounded-[10px] bg-green-800 px-4 py-3.5 text-sm text-white shadow-lg">{toast}</div>
+        <div
+          role="status"
+          className={`fixed bottom-6 right-6 z-50 max-w-[360px] rounded-[10px] px-4 py-3.5 text-sm text-white shadow-lg ${
+            toast.tone === "error"
+              ? "bg-red-800"
+              : toast.tone === "info"
+                ? "bg-slate-800"
+                : "bg-green-800"
+          }`}
+        >
+          {toast.text}
+        </div>
       )}
     </div>
   );
@@ -848,9 +1051,9 @@ function TicketTable({
 }
 
 function Steps({ on }: { on: number }) {
-  const labels = ["1. Entry", "2. Capture", "3. Review & Submit", "4. Prioritize", "5. Boards / PRD", "6. Delivery", "7. Sign-off"];
+  const labels = ["1. Entry", "2. Capture", "3. Review & Submit", "4. Priority"];
   return (
-    <div className="mb-5 flex flex-wrap gap-1.5 text-[11px] text-[#5b6b82]">
+    <div className="mb-5 flex flex-wrap gap-1.5 text-[11px] text-[#5b6b82]" aria-label="Request progress">
       {labels.map((l, i) => (
         <span key={l} className={`rounded-md px-2 py-1 ${i + 1 === on ? "bg-blue-100 text-blue-800" : i + 1 < on ? "bg-green-100 text-green-800" : "bg-[#eef2f7]"}`}>{l}</span>
       ))}
@@ -872,11 +1075,23 @@ function Panel({ children, className = "" }: { children: React.ReactNode; classN
   return <div className={`rounded-xl border border-[#d8dee8] bg-white p-5 ${className}`}>{children}</div>;
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  children,
+  hint,
+  error,
+}: {
+  label: string;
+  children: React.ReactNode;
+  hint?: string;
+  error?: string;
+}) {
   return (
     <label className="mb-1 mt-3.5 block text-xs text-[#5b6b82]">
       {label}
       <div className="mt-1.5">{children}</div>
+      {hint && !error && <p className="mt-1.5 text-[11px] leading-snug text-[#5b6b82]">{hint}</p>}
+      {error && <p className="mt-1.5 text-[11px] leading-snug text-red-700">{error}</p>}
     </label>
   );
 }
